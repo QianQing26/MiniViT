@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
+
 from .patch_embed import PatchEmbedding
+from .transformer import TransformerEncoderBlock
 
 
 class MiniViT(nn.Module):
@@ -11,7 +13,10 @@ class MiniViT(nn.Module):
         in_channels=3,
         embed_dim=128,
         depth=4,
+        heads=4,
+        mlp_ratio=4.0,
         num_classes=10,
+        dropout=0.1,
     ):
         super().__init__()
 
@@ -29,7 +34,14 @@ class MiniViT(nn.Module):
 
         self.pos_drop = nn.Dropout(p=0.1)
 
-        pass  # transformer encoder
+        self.blocks = nn.ModuleList(
+            [
+                TransformerEncoderBlock(embed_dim, heads, mlp_ratio, dropout)
+                for _ in range(depth)
+            ]
+        )
+
+        self.norm = nn.LayerNorm(embed_dim)
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(embed_dim), nn.Linear(embed_dim, num_classes)
@@ -38,7 +50,7 @@ class MiniViT(nn.Module):
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
         nn.init.trunc_normal_(self.cls_token, std=0.02)
 
-    def forward(self, x):
+    def forward(self, x, return_cls=False):
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -49,7 +61,17 @@ class MiniViT(nn.Module):
         x = x + self.pos_embed[:, : x.size(1), :]
         x = self.pos_drop(x)
 
-        # x = self.blocks(x)
+        for blk in self.blocks:
+            x = blk(x)
+
+        x = self.norm(x)
 
         cls_out = x[:, 0]
-        return self.mlp_head(cls_out)
+        return cls_out if return_cls else self.mlp_head(cls_out)
+
+
+if __name__ == "__main__":
+    model = MiniViT()
+    x = torch.randn(2, 3, 32, 32)
+    out = model(x)
+    print(out.shape)  # [2, 10]
